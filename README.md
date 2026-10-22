@@ -91,7 +91,7 @@ The client secret belongs on the server. Never bundle it in the extension.
 ## Support the project
 
 Bug reports, suggestions, and contributions are welcome. If Proofclip helps you,
-share the repository or give it a star.
+share the repository, give it a star, or [buy me a coffee](https://buymeacoffee.com/braniq).
 
 ## License
 
