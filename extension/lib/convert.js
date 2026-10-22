@@ -369,7 +369,9 @@ export function chunkBlocks(blocks, { maxTop = MAX_CHILDREN, maxTotal = 900, max
 
 // --- Verification ----------------------------------------------------------
 
-const normalize = s => s.replace(/\s+/g, ' ').trim()
+// Notion removes zero-width word-break spaces from stored rich text.
+// Keep other invisible characters, such as joiners used in emoji and scripts.
+const normalize = s => s.replace(/\u200b/g, '').replace(/\s+/g, ' ').trim()
 
 export function blockText(block) {
   const data = block[block.type] || {}

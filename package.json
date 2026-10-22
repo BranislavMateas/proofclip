@@ -1,20 +1,28 @@
 {
   "name": "proofclip",
-  "version": "1.0.0",
+  "version": "0.2.0",
   "description": "Open-source Notion web clipper that verifies every save",
-  "main": "index.js",
   "scripts": {
     "test": "node --test test/*.test.js",
     "e2e": "node test/e2e.mjs",
-    "real": "node test/real-notion.mjs"
+    "real": "node test/real-notion.mjs",
+    "package": "python3 scripts/package-extension.py"
   },
   "keywords": [],
-  "author": "",
+  "author": "Branislav Mateáš",
   "license": "ISC",
   "devDependencies": {
     "@mozilla/readability": "^0.6.0",
     "linkedom": "^0.18.14",
     "puppeteer-core": "^25.15.0"
   },
-  "type": "module"
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BranislavMateas/proofclip.git"
+  },
+  "bugs": {
+    "url": "https://github.com/BranislavMateas/proofclip/issues"
+  },
+  "homepage": "https://github.com/BranislavMateas/proofclip#readme"
 }

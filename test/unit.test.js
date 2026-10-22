@@ -98,6 +98,16 @@ test('verification detects missing and altered blocks', () => {
   assert.match(verifyBlocks(sent, stored).note, /Block 2/)
 })
 
+test('verification accepts Notion removing zero-width spaces but preserves meaningful joiners', () => {
+  const sent = convert('<p>document\u200b.currentScript \u{1f469}\u200d\u{1f4bb}</p>')
+  const stored = [{ type: 'paragraph', paragraph: { rich_text: [{ plain_text: 'document.currentScript \u{1f469}\u200d\u{1f4bb}' }] } }]
+  assert.equal(verifyBlocks(sent, stored).ok, true)
+  stored[0].paragraph.rich_text[0].plain_text = 'document.currentScript \u{1f469}\u{1f4bb}'
+  assert.equal(verifyBlocks(sent, stored).ok, false, 'an emoji joiner must not be ignored')
+  stored[0].paragraph.rich_text[0].plain_text = 'document.currentScrip \u{1f469}\u200d\u{1f4bb}'
+  assert.equal(verifyBlocks(sent, stored).ok, false, 'visible content changes must still fail')
+})
+
 test('markdown export', () => {
   const md = blocksToMarkdown(convert(`<h2>Head</h2><p>Some <b>bold</b> <a href="https://a.b">l</a></p><ul><li>x<ul><li>y</li></ul></li></ul><ol><li>one</li><li>two</li></ol><pre class="language-py">print(1)</pre><table><tr><th>A</th></tr><tr><td>1</td></tr></table>`))
   assert.equal(md.trim(), [

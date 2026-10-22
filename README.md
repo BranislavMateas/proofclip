@@ -1,51 +1,99 @@
 # Proofclip
 
-An open-source web clipper for Notion. It works like Notion's own Web Clipper and checks every save.
+**Save web pages to Notion. Check what arrived.**
 
-## Parity with Notion Web Clipper
+A free, open-source Chrome extension. Preview your clip, edit its properties,
+and save it to a Notion page or database. Proofclip then reads the saved blocks
+back from Notion and compares their types and text, including nested blocks.
 
-| Notion Web Clipper | Proofclip |
-|---|---|
-| Sign in with your Notion account | **Sign in with Notion** (OAuth). Integration tokens also work. |
-| Workspace picker | Workspace switcher. Each workspace remembers its own last destination. |
-| “Add to” any page or database, default list + search | Recent destinations plus search, with arrow keys and Enter to pick |
-| `+ New links database` | Same. You name it and choose its parent page. |
-| Editable title, Enter / `Save page` | Same |
-| “Open in Notion” after saving | Same |
-| URL property added to databases that lack one | Same. If Proofclip can't edit the schema, the clip still saves. |
-| Tags/properties only editable afterwards in Notion | **Better:** edit every property before saving. Values are filled in automatically and tags are remembered. |
-| Silent missing text / wrong content | **Better:** a preview of the exact blocks to be saved, missing-content and block-page warnings, plus Selection and Full page modes |
-| Failed saves are lost | **Better:** each clip is stored locally first. Proofclip retries with backoff, resumes partial uploads without duplicates, and waits out rate limits. |
-| No check of the result | **Better:** Proofclip reads the page back from Notion and compares every block, including nested blocks |
-| — | Markdown copy/download, history, and JSON backup/restore |
+![Proofclip verifies a saved page](docs/assets/verified-save.png)
 
-Out of scope: the iOS/Android share sheet and Safari.
+## Why Proofclip?
 
-## Install (development)
+- **Preview before saving.** See the blocks that will be sent to Notion.
+- **Choose your content.** Clip the article, your selection, or the full page.
+- **Organize in the popup.** Edit supported properties and tags, search destinations,
+  or create a new links database.
+- **Keep a local copy.** Failed uploads stay in History and can retry automatically.
+- **Check the result.** See a verified result or a mismatch message after saving.
+- **Take your content with you.** Copy or download Markdown, or back up clips as JSON.
+- **Connect multiple workspaces.** Each connection remembers its last destination.
 
-1. `chrome://extensions` → Developer mode → **Load unpacked** → `extension/`.
-2. Settings → **Connect with an integration token**. Create the token at notion.so/profile/integrations with Read, Insert and Update content. Then share pages or databases with it: ••• → Connections.
+## Install
 
-### Enabling “Sign in with Notion”
+The Chrome Web Store release is being prepared. You can load the extension now:
 
-1. Create a **public** integration in Notion. Set its redirect URI to `https://<extension-id>.chromiumapp.org/notion`.
-2. Deploy `server/oauth-worker.js` (Cloudflare Worker) with the secrets `NOTION_CLIENT_ID` and `NOTION_CLIENT_SECRET`. Set `ALLOWED_ORIGIN=chrome-extension://<extension-id>`.
-3. Put the client ID and the worker URL in `extension/config.js`. The client secret never ships in the extension, and the worker stores nothing.
+1. Download this repository and extract it, or clone it with Git.
+2. Open `chrome://extensions` and turn on **Developer mode**.
+3. Click **Load unpacked** and select the `extension/` directory.
+4. Open Proofclip **Settings** and connect with a Notion integration token.
 
-## Tests
+Create an internal connection at [Notion's developer portal](https://www.notion.so/profile/integrations)
+with **Read content**, **Insert content**, and **Update content** permissions.
+Share only the pages or databases you want the connection to access.
 
-```
+This release uses integration tokens. One-click **Sign in with Notion** requires
+an OAuth deployment and is not configured in the distributed extension.
+
+## How it works
+
+1. Open a page and click Proofclip.
+2. Choose Article, Selection, or Full page mode and inspect the preview.
+3. Pick a Notion page or database. Edit the title and supported properties.
+4. Click **Save page**. Proofclip stores a local copy, uploads it, and checks the saved blocks.
+5. Click **Open in Notion** to view the result.
+
+Verification compares block types and text, with whitespace normalization. It does
+not confirm that external images remain available or compare all formatting and links.
+
+## Privacy
+
+Clips and connection details stay in your browser's local extension storage.
+Content is sent directly to Notion when you save or retry. Preview images can load
+from their source websites. There are no analytics or ads.
+
+Read the [privacy policy](PRIVACY.md). Report problems in
+[GitHub Issues](https://github.com/BranislavMateas/proofclip/issues).
+Do not post API tokens or private content in an issue.
+
+## Development and tests
+
+```sh
 npm install
-npm test        # 26 unit/integration tests against a strict mock Notion API
-npm run e2e     # real extension in Chrome: OAuth, workspaces, search, pages, databases,
-                # new links database, URL property, outage/retry, deleted destination,
-                # revoked token, selection, warnings, history (17 steps)
-npm run real    # the real Notion API: needs NOTION_TOKEN + NOTION_PAGE_ID (or .env.test)
-node test/real-pages.mjs URL…   # clip live sites through the extension into the mock
+npm test        # 27 unit/integration tests against a strict mock Notion API
+npm run e2e     # real extension in Chrome, tested against the mock API
+npm run real    # live Notion API; requires NOTION_TOKEN and NOTION_PAGE_ID
+npm run package # build dist/proofclip-0.2.0.zip from extension/ only
 ```
 
-## Known gaps
+`npm run real` also reads a Git-ignored `.env.test` file. It moves the generated
+Notion pages and database to trash after the test. Set `KEEP=1` to retain them.
+Never put a token in tracked files or commit it to Git.
 
-- The integration hasn't run against the real Notion API yet. Run `npm run real` with a token to do that.
-- If Notion creates a page but its response is lost, a retry creates a second page.
-- Proofclip uses API version `2022-06-28`. It doesn't yet support multi-source databases (`2025-09-03`).
+On October 22, 2026, all eight live API clips passed verification, including six
+public websites. A separate Chrome run saved and verified a 265-block clip.
+
+### Optional OAuth deployment
+
+1. Create a public Notion integration with redirect URI `https://<extension-id>.chromiumapp.org/notion`.
+2. Deploy `server/oauth-worker.js` with `NOTION_CLIENT_ID` and `NOTION_CLIENT_SECRET` secrets.
+3. Set `ALLOWED_ORIGIN=chrome-extension://<extension-id>` on the worker.
+4. Add the public client ID and worker URL to `extension/config.js`.
+
+The client secret belongs on the server. Never bundle it in the extension.
+
+## Current limitations
+
+- If Notion creates a page but its response is lost, a retry can create a duplicate page.
+- The extension uses Notion API version `2022-06-28`. Multi-source databases are not supported.
+- Safari and mobile share sheets are outside the current scope.
+
+## Support the project
+
+Bug reports, suggestions, and contributions are welcome. If Proofclip helps you,
+share the repository or give it a star.
+
+## License
+
+[ISC](LICENSE). Bundled Mozilla Readability uses the [Apache 2.0 license](extension/vendor/LICENSE.md).
+Proofclip is an independent project and is not affiliated with Notion.
