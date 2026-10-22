@@ -1,0 +1,80 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Proofclip</title><link rel="stylesheet" href="ui.css">
+<style>
+  body { width: 440px; padding: 10px 12px 12px; }
+  header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  h1 { font-size: 14px; margin: 0; }
+  #workspace { width: auto; max-width: 180px; padding: 2px 6px; }
+  #title { font-size: 15px; font-weight: 600; padding: 7px 9px; }
+  .picker { position: relative; }
+  #destButton { width: 100%; text-align: left; display: flex; justify-content: space-between; background: var(--bg); }
+  #destPanel { position: absolute; z-index: 5; left: 0; right: 0; top: calc(100% + 4px); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgb(0 0 0 / .14); padding: 6px; }
+  #destList { max-height: 220px; overflow: auto; margin: 6px 0 0; padding: 0; list-style: none; }
+  #destList li.group { font-size: 11px; color: var(--muted); padding: 6px 6px 2px; text-transform: uppercase; letter-spacing: .03em; }
+  #destList button { width: 100%; border: 0; background: none; text-align: left; padding: 5px 6px; border-radius: 5px; display: flex; gap: 6px; }
+  #destList button:hover, #destList button.active { background: var(--soft); }
+  #destList .kind { margin-left: auto; color: var(--muted); font-size: 11px; }
+  .newdb { border-top: 1px solid var(--line); margin-top: 6px; padding-top: 6px; }
+  .newdb > button { border: 0; background: none; color: var(--accent); padding: 4px 6px; }
+  details.props > summary { cursor: pointer; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; margin-top: 10px; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Proofclip</h1>
+    <select id="workspace" title="Workspace" hidden></select>
+    <span><a href="history.html" target="_blank">History</a> · <a href="options.html" target="_blank">Settings</a></span>
+  </header>
+  <div id="notice" class="notice" hidden></div>
+
+  <main id="form" hidden>
+    <label for="title">Title</label>
+    <input id="title" autocomplete="off">
+
+    <label for="destButton">Add to</label>
+    <div class="picker">
+      <button id="destButton" type="button" aria-haspopup="listbox" aria-expanded="false"><span id="destLabel" class="muted">Choose a page or database…</span><span>▾</span></button>
+      <div id="destPanel" hidden>
+        <input id="destSearch" placeholder="Search for a page or database" autocomplete="off">
+        <ul id="destList" role="listbox"></ul>
+        <div class="newdb">
+          <button id="newDbToggle" type="button">+ New links database</button>
+          <div id="newDbForm" hidden>
+            <div class="row"><input id="newDbName" class="grow" value="Links" aria-label="Database name"><button id="newDbCreate" type="button" class="primary">Create</button></div>
+            <div class="row" style="margin-top:4px"><span class="muted">in</span><select id="newDbParent" class="grow" aria-label="Parent page"></select></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:10px">
+      <div class="segmented" id="sourceToggle">
+        <button data-source="article" aria-pressed="true">Article</button>
+        <button data-source="selection">Selection</button>
+        <button data-source="page">Full page</button>
+      </div>
+      <span id="stats" class="muted grow" style="text-align:right;white-space:nowrap;font-size:11.5px"></span>
+    </div>
+    <div id="warning" class="notice bad" hidden></div>
+
+    <details class="props" id="propsBox" open hidden><summary>Properties</summary><div id="props"></div></details>
+    <p id="urlNote" class="muted" hidden style="margin:6px 0 0;font-size:12px">This database has no URL property — Proofclip will add one so the source is recorded.</p>
+
+    <label>Preview — what will be saved</label>
+    <div id="preview" class="preview"></div>
+
+    <div class="row" style="margin-top:10px">
+      <button id="save" class="primary grow" disabled>Save page</button>
+      <button id="copyMd" title="Copy as Markdown">Copy MD</button>
+      <button id="downloadMd" title="Download Markdown file">.md</button>
+    </div>
+  </main>
+
+  <section id="result" hidden>
+    <p><span id="resultBadge" class="badge"></span> <span id="resultText"></span></p>
+    <div class="row"><a id="openPage" target="_blank" hidden>Open in Notion</a><span class="grow"></span><button id="retry" hidden>Retry now</button></div>
+  </section>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

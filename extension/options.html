@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Proofclip settings</title><link rel="stylesheet" href="ui.css">
+<style>
+  body { max-width: 580px; margin: 32px auto; padding: 0 16px; font-size: 14px; }
+  h1 { font-size: 20px; } h2 { font-size: 15px; margin-top: 26px; }
+  ol { padding-left: 20px; } li { margin: 4px 0; }
+  #connections { list-style: none; padding: 0; margin: 0; }
+  #connections li { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+</style>
+</head>
+<body>
+  <h1>Proofclip settings</h1>
+  <p class="muted">Proofclip talks to Notion directly from your browser. Clips never pass through another server.</p>
+
+  <h2>Workspaces</h2>
+  <ul id="connections"></ul>
+  <p id="none" class="muted" hidden>No workspace connected yet.</p>
+
+  <div id="oauthBox" hidden>
+    <button id="signIn" class="primary">Sign in with Notion</button>
+    <span class="muted">Choose a workspace and the pages Proofclip may use.</span>
+  </div>
+
+  <details id="tokenBox" style="margin-top:14px">
+    <summary>Connect with an integration token</summary>
+    <ol>
+      <li>Open <a href="https://www.notion.so/profile/integrations" target="_blank">notion.so/profile/integrations</a> and create an <b>internal</b> integration with “Read content”, “Insert content” and “Update content”.</li>
+      <li>Copy its secret and paste it below.</li>
+      <li>In Notion, open each page or database you want to clip into → <b>•••</b> → <b>Connections</b> → add the integration. Sharing a page also shares everything inside it.</li>
+    </ol>
+    <label for="token">Integration secret</label>
+    <div class="row"><input id="token" type="password" class="grow" placeholder="ntn_…" autocomplete="off"><button id="connect" class="primary">Connect</button></div>
+    <label for="apiBase">API base URL</label><input id="apiBase" value="https://api.notion.com">
+  </details>
+  <div id="status" class="notice" hidden></div>
+  <script type="module" src="options.js"></script>
+</body>
+</html>

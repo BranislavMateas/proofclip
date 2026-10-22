@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Proofclip — verified web clipper for Notion",
+  "short_name": "Proofclip",
+  "version": "0.2.0",
+  "description": "Clip the article you see into a Notion database, edit properties first, and confirm Notion stored every block. Failed saves are kept and retried.",
+  "permissions": ["activeTab", "scripting", "storage", "unlimitedStorage", "alarms", "identity"],
+  "host_permissions": ["https://api.notion.com/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_popup": "popup.html", "default_title": "Clip to Notion" },
+  "options_page": "options.html",
+  "commands": { "_execute_action": { "suggested_key": { "default": "Alt+Shift+S" } } }
+}
