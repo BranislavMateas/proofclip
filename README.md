@@ -63,7 +63,7 @@ npm install
 npm test        # 27 unit/integration tests against a strict mock Notion API
 npm run e2e     # real extension in Chrome, tested against the mock API
 npm run real    # live Notion API; requires NOTION_TOKEN and NOTION_PAGE_ID
-npm run package # build dist/proofclip-0.2.0.zip from extension/ only
+npm run package # build dist/proofclip-0.2.1.zip from extension/ only
 ```
 
 `npm run real` also reads a Git-ignored `.env.test` file. It moves the generated

@@ -1,8 +1,8 @@
 # Chrome Web Store listing
 
-Name: Proofclip — verified web clipper for Notion
+Name: Proofclip: verified web clipper for Notion
 Short description: Save web pages to Notion. Preview the content, edit properties, and verify that every text block arrived.
-Category: Productivity
+Category: Workflow and planning (Productivity)
 Language: English
 Price: Free
 Website: https://github.com/BranislavMateas/proofclip

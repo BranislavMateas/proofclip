@@ -89,7 +89,7 @@ function field(prop) {
   }
   if (prop.type === 'select' || prop.type === 'status') {
     input = document.createElement('select')
-    input.append(new Option('—', ''), ...prop.options.map(o => new Option(o, o)))
+    input.append(new Option('None', ''), ...prop.options.map(o => new Option(o, o)))
     if (value && !prop.options.includes(value)) input.append(new Option(value, value))
     input.value = value || ''
   } else if (prop.type === 'rich_text' && /excerpt|summary|description|note/i.test(prop.name)) {
@@ -249,7 +249,7 @@ function showResult(clip) {
     verifying: 'Uploaded. Checking that Notion stored every block…',
     verified: `Saved to ${clip.destination.title} and verified. ${clip.verifyNote}`,
     mismatch: `Saved, but Notion's copy differs: ${clip.verifyNote} Your full copy is kept in History.`,
-    failed: `Not saved: ${clip.error} ${clip.retryable ? `Kept locally — retrying automatically${clip.nextRetryAt ? ` at ${new Date(clip.nextRetryAt).toLocaleTimeString()}` : ''}.` : 'Kept locally in History.'}`,
+    failed: `Not saved: ${clip.error} ${clip.retryable ? `Kept locally. Retrying automatically${clip.nextRetryAt ? ` at ${new Date(clip.nextRetryAt).toLocaleTimeString()}` : ''}.` : 'Kept locally in History.'}`,
   }
   $('resultBadge').textContent = clip.status
   $('resultBadge').className = `badge ${clip.status}`
