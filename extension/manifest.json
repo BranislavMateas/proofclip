@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Proofclip: verified web clipper for Notion",
   "short_name": "Proofclip",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Save web pages to Notion. Preview content, edit properties, and verify the saved blocks.",
   "permissions": [
     "activeTab",

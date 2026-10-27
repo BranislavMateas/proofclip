@@ -6,7 +6,7 @@ import { getSettings, updateSettings, activeConnection, rememberDestination } fr
 
 const $ = id => document.getElementById(id)
 const clips = storage()
-const state = { page: null, source: 'article', blocks: [], dest: null, props: [], values: {}, client: null, settings: null, connection: null, results: [], searchSeq: 0 }
+const state = { page: null, source: 'article', blocks: [], dest: null, schemaReady: false, props: [], values: {}, client: null, settings: null, connection: null, results: [], searchSeq: 0 }
 
 function notice(html, bad = false) {
   $('notice').innerHTML = html
@@ -49,7 +49,7 @@ function completenessWarning(words) {
 }
 
 function updateSaveButton() {
-  $('save').disabled = !state.blocks.length || !state.client || !state.dest || !$('title').value.trim()
+  $('save').disabled = !state.blocks.length || !state.client || !state.dest || !state.schemaReady || !$('title').value.trim()
 }
 
 // --- Properties ------------------------------------------------------------
@@ -111,12 +111,17 @@ async function loadSchema() {
   state.props = []
   $('propsBox').hidden = true
   $('urlNote').hidden = true
-  if (state.dest?.type !== 'database') return
   const dest = state.dest
-  const db = await state.client.getDatabase(dest.id)
-  if (state.dest !== dest) return
+  const client = state.client
+  const resolved = await client.resolveDestination(dest)
+  const db = resolved.type === 'data_source' ? await client.getDataSource(resolved.id) : null
+  if (state.dest !== dest || state.client !== client) return
+  state.dest = resolved
+  $('destLabel').textContent = label(resolved)
+  state.schemaReady = true
+  if (!db) return
   state.props = editableProperties(db)
-  state.values = autofill(state.props, state.page, state.settings.sticky[dest.id] || {})
+  state.values = autofill(state.props, state.page, state.settings.sticky[resolved.id] || state.settings.sticky[dest.id] || {})
   const others = state.props.filter(p => p.type !== 'title')
   $('props').replaceChildren(...others.map(field))
   $('propsBox').hidden = !others.length
@@ -125,7 +130,7 @@ async function loadSchema() {
 
 // --- Destination picker ----------------------------------------------------
 
-const label = d => `${d.icon || (d.type === 'database' ? '🗂' : '📄')} ${d.title}`
+const label = d => `${d.icon || (d.type === 'page' ? '📄' : '🗂')} ${d.title}`
 
 function renderDestinations() {
   const query = $('destSearch').value.trim()
@@ -140,7 +145,7 @@ function renderDestinations() {
       const b = Object.assign(document.createElement('button'), { type: 'button' })
       b.setAttribute('role', 'option')
       b.dataset.id = d.id
-      b.append(Object.assign(document.createElement('span'), { textContent: label(d) }), Object.assign(document.createElement('span'), { className: 'kind', textContent: d.type }))
+      b.append(Object.assign(document.createElement('span'), { textContent: label(d) }), Object.assign(document.createElement('span'), { className: 'kind', textContent: d.type === 'data_source' ? 'data source' : d.type }))
       b.onclick = () => chooseDestination(d)
       li.append(b)
       items.push(li)
@@ -166,12 +171,14 @@ function renderDestinations() {
 
 async function search() {
   const seq = ++state.searchSeq
+  const client = state.client
   try {
-    const results = await state.client.search($('destSearch').value.trim())
-    if (seq !== state.searchSeq) return
+    const results = await client.search($('destSearch').value.trim())
+    if (seq !== state.searchSeq || client !== state.client) return
     state.results = results
     renderDestinations()
   } catch (e) {
+    if (seq !== state.searchSeq || client !== state.client) return
     if (e.status === 401) handleNotionError(e)
     else notice(`Couldn't search Notion: ${e.message}`, true)
   }
@@ -189,15 +196,17 @@ function togglePanel(open = $('destPanel').hidden) {
 
 async function chooseDestination(d) {
   state.dest = d
+  state.schemaReady = false
+  const client = state.client
   $('destLabel').textContent = label(d)
   $('destLabel').className = ''
   togglePanel(false)
   updateSaveButton()
   try {
     await loadSchema()
-    notice('')
+    if (client === state.client && state.schemaReady) notice('')
   } catch (e) {
-    handleNotionError(e, d)
+    if (client === state.client && state.dest === d) handleNotionError(e, d)
   }
   updateSaveButton()
 }
@@ -249,7 +258,7 @@ function showResult(clip) {
     verifying: 'Uploaded. Checking that Notion stored every block…',
     verified: `Saved to ${clip.destination.title} and verified. ${clip.verifyNote}`,
     mismatch: `Saved, but Notion's copy differs: ${clip.verifyNote} Your full copy is kept in History.`,
-    failed: `Not saved: ${clip.error} ${clip.retryable ? `Kept locally. Retrying automatically${clip.nextRetryAt ? ` at ${new Date(clip.nextRetryAt).toLocaleTimeString()}` : ''}.` : 'Kept locally in History.'}`,
+    failed: `Save incomplete: ${clip.error} ${clip.retryable ? `Kept locally. Retrying automatically${clip.nextRetryAt ? ` at ${new Date(clip.nextRetryAt).toLocaleTimeString()}` : ''}.` : 'Kept locally in History.'}`,
   }
   $('resultBadge').textContent = clip.status
   $('resultBadge').className = `badge ${clip.status}`
@@ -267,7 +276,7 @@ async function save() {
   const title = $('title').value.trim()
   let properties
   let ensureUrlProperty = null
-  if (dest.type === 'database') {
+  if (dest.type === 'data_source') {
     const titleProp = state.props.find(p => p.type === 'title')
     if (titleProp) state.values[titleProp.name] = title
     properties = buildProperties(state.props, state.values)
@@ -310,6 +319,7 @@ async function useConnection(connection) {
   state.connection = connection
   state.client = createClient(connection)
   state.dest = null
+  state.schemaReady = false
   state.results = []
   $('destLabel').textContent = 'Choose a page or database…'
   $('destLabel').className = 'muted'

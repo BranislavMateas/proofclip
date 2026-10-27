@@ -6,6 +6,8 @@ import { randomUUID } from 'node:crypto'
 
 export const DB_ID = 'db000000-0000-0000-0000-000000000001'
 export const NO_URL_DB_ID = 'db000000-0000-0000-0000-000000000002'
+export const DS_ID = 'ds000000-0000-0000-0000-000000000001'
+export const NO_URL_DS_ID = 'ds000000-0000-0000-0000-000000000002'
 export const PAGE_ID = 'pg000000-0000-0000-0000-000000000001'
 export const TEAM_PAGE_ID = 'pg000000-0000-0000-0000-000000000002'
 export const OAUTH = { clientId: 'client-123', clientSecret: 'shh', code: 'code-abc', token: 'secret_ws2' }
@@ -43,12 +45,18 @@ function makeWorkspaces() {
   }
 }
 
+const sources = (id, db) => db.sources || [{ id: id === DB_ID ? DS_ID : id === NO_URL_DB_ID ? NO_URL_DS_ID : `source-${id}`, title: db.title, properties: db.properties }]
+
 function databaseObject(id, db) {
+  return { object: 'database', id, title: plainTitle(db.title), data_sources: sources(id, db).map(s => ({ id: s.id, name: s.title })), in_trash: false }
+}
+
+function sourceObject(databaseId, db, source) {
   const properties = {}
-  for (const [name, p] of Object.entries(db.properties)) {
+  for (const [name, p] of Object.entries(source.properties)) {
     properties[name] = { id: name.toLowerCase(), name, type: p.type, [p.type]: p.options ? { options: p.options.map(o => ({ name: o })) } : {} }
   }
-  return { object: 'database', id, url: `https://www.notion.so/${id}`, title: plainTitle(db.title), icon: db.icon ? { type: 'emoji', emoji: db.icon } : null, properties, archived: false, in_trash: false }
+  return { object: 'data_source', id: source.id, parent: { type: 'database_id', database_id: databaseId }, title: plainTitle(source.title), icon: db.icon ? { type: 'emoji', emoji: db.icon } : null, properties, in_trash: false }
 }
 
 const pageObject = (id, page) => ({
@@ -66,7 +74,7 @@ export function startMockNotion({ token = 'secret_test', failAppends = 0, failCr
   const workspaces = makeWorkspaces()
   const pages = new Map()
   const requests = []
-  const state = { failAppends, failCreates, denySchemaEdits: false, rateLimitEvery: 0, served: 0 }
+  const state = { failAppends, failCreates, dropCreates: 0, dropAppends: 0, dropUpdates: 0, denySchemaEdits: false, rateLimitEvery: 0, served: 0 }
 
   function validateRich(rich, where) {
     if (!Array.isArray(rich)) throw `${where}: rich_text must be an array`
@@ -131,12 +139,18 @@ export function startMockNotion({ token = 'secret_test', failAppends = 0, failCr
       res.writeHead(status, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': '*', ...headers })
       res.end(body === undefined ? '' : JSON.stringify(body))
     }
+    const loseResponse = () => {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': '4096', 'Access-Control-Allow-Origin': '*' })
+      res.flushHeaders()
+      res.write('{"object":')
+      setImmediate(() => res.destroy())
+    }
     if (req.method === 'OPTIONS') return send(204)
     let raw = ''
     for await (const chunk of req) raw += chunk
     const body = raw ? JSON.parse(raw) : null
     const url = new URL(req.url, 'http://x')
-    requests.push({ method: req.method, path: url.pathname, body, auth: req.headers.authorization })
+    requests.push({ method: req.method, path: url.pathname, body, auth: req.headers.authorization, version: req.headers['notion-version'] })
 
     // OAuth: the consent screen approves immediately and redirects with a code.
     if (url.pathname === '/v1/oauth/authorize') {
@@ -159,7 +173,7 @@ export function startMockNotion({ token = 'secret_test', failAppends = 0, failCr
     if (state.rateLimitEvery && ++state.served % state.rateLimitEvery === 0) return send(429, { code: 'rate_limited', message: 'Rate limited' }, { 'Retry-After': '0.05' })
     const ws = workspaces[(req.headers.authorization || '').replace(/^Bearer /, '')]
     if (!ws) return send(401, { code: 'unauthorized', message: 'API token is invalid.' })
-    if (!req.headers['notion-version']) return send(400, { code: 'missing_version', message: 'Notion-Version header missing' })
+    if (req.headers['notion-version'] !== '2026-03-11') return send(400, { code: 'invalid_version', message: 'Expected Notion-Version 2026-03-11' })
     try {
       let m
       if (req.method === 'GET' && url.pathname === '/v1/users/me') {
@@ -168,19 +182,20 @@ export function startMockNotion({ token = 'secret_test', failAppends = 0, failCr
       if (req.method === 'POST' && url.pathname === '/v1/search') {
         const query = (body?.query || '').toLowerCase()
         let results = [
-          ...Object.entries(ws.databases).map(([id, db]) => databaseObject(id, db)),
+          ...Object.entries(ws.databases).flatMap(([id, db]) => sources(id, db).map(source => sourceObject(id, db, source))),
           ...Object.entries(ws.pages).map(([id, p]) => pageObject(id, p)),
         ]
         if (body?.filter?.value) results = results.filter(r => r.object === body.filter.value)
-        if (query) results = results.filter(r => (r.object === 'database' ? r.title : r.properties.title.title)[0].plain_text.toLowerCase().includes(query))
+        if (query) results = results.filter(r => (r.object === 'data_source' ? plainTitle(ws.databases[r.parent.database_id].title + ' ' + r.title[0].plain_text) : r.properties.title.title)[0].plain_text.toLowerCase().includes(query))
         return send(200, { results, has_more: false, next_cursor: null })
       }
       if (req.method === 'POST' && url.pathname === '/v1/databases') {
         if (!ws.pages[body.parent?.page_id]) return send(404, { code: 'object_not_found', message: 'Could not find page' })
-        const titles = Object.values(body.properties || {}).filter(p => 'title' in p)
+        if (body.properties) throw 'Schema must be in initial_data_source'
+        const titles = Object.values(body.initial_data_source?.properties || {}).filter(p => 'title' in p)
         if (titles.length !== 1) throw 'A database needs exactly one title property.'
         const id = randomUUID()
-        const properties = Object.fromEntries(Object.entries(body.properties).map(([name, p]) => {
+        const properties = Object.fromEntries(Object.entries(body.initial_data_source.properties).map(([name, p]) => {
           const type = Object.keys(p)[0]
           return [name, { type, ...(p[type]?.options && { options: p[type].options.map(o => o.name) }) }]
         }))
@@ -190,41 +205,63 @@ export function startMockNotion({ token = 'secret_test', failAppends = 0, failCr
       if ((m = url.pathname.match(/^\/v1\/databases\/([^/]+)$/))) {
         const db = ws.databases[m[1]]
         if (!db) return send(404, { code: 'object_not_found', message: 'Could not find database' })
-        if (req.method === 'PATCH') {
-          if (state.denySchemaEdits) return send(403, { code: 'restricted_resource', message: 'Insufficient permissions to update database schema' })
-          for (const [name, p] of Object.entries(body.properties || {})) db.properties[name] = { type: Object.keys(p)[0] }
-        }
+        if (req.method !== 'GET') throw 'Schema updates must target a data source'
         return send(200, databaseObject(m[1], db))
+      }
+      const sourceMatch = url.pathname.match(/^\/v1\/data_sources\/([^/]+)(\/query)?$/)
+      if (sourceMatch) {
+        const entry = Object.entries(ws.databases).flatMap(([id, db]) => sources(id, db).map(source => ({ id, db, source }))).find(x => x.source.id === sourceMatch[1])
+        if (!entry) return send(404, { code: 'object_not_found', message: 'Could not find data source' })
+        const { id, db, source } = entry
+        if (sourceMatch[2] && req.method === 'POST') {
+          const matches = [...pages.values()].filter(p => p.root && p.workspace === ws.name && p.parent.data_source_id === source.id && p.properties[body.filter.property]?.title.map(t => t.text.content).join('') === body.filter.title.equals)
+          return send(200, { results: matches, has_more: false, next_cursor: null })
+        }
+        if (req.method === 'PATCH') {
+          if (state.denySchemaEdits) return send(403, { code: 'restricted_resource', message: 'Insufficient permissions to update data source schema' })
+          for (const [name, p] of Object.entries(body.properties || {})) source.properties[name] = { type: Object.keys(p)[0] }
+        }
+        return send(200, sourceObject(id, db, source))
+      }
+      if ((m = url.pathname.match(/^\/v1\/pages\/([^/]+)$/)) && req.method === 'PATCH') {
+        const page = pages.get(m[1])
+        if (!page || page.workspace !== ws.name) return send(404, { code: 'object_not_found', message: 'Could not find page' })
+        Object.assign(page.properties, body.properties)
+        if (state.dropUpdates > 0) { state.dropUpdates--; return loseResponse() }
+        return send(200, { object: 'page', id: page.id, url: page.url })
       }
       if (req.method === 'POST' && url.pathname === '/v1/pages') {
         if (state.failCreates > 0) { state.failCreates--; return send(502, { code: 'bad_gateway', message: 'Bad gateway' }) }
         const parent = body.parent || {}
-        if (parent.database_id) {
-          const db = ws.databases[parent.database_id]
-          if (!db) return send(404, { code: 'object_not_found', message: 'Could not find database' })
-          validateProperties(db.properties, body.properties)
+        if (parent.data_source_id) {
+          const source = Object.entries(ws.databases).flatMap(([id, db]) => sources(id, db)).find(source => source.id === parent.data_source_id)
+          if (!source) return send(404, { code: 'object_not_found', message: 'Could not find database' })
+          validateProperties(source.properties, body.properties)
         } else if (parent.page_id) {
           if (!ws.pages[parent.page_id]) return send(404, { code: 'object_not_found', message: 'Could not find page' })
           const keys = Object.keys(body.properties || {})
           if (keys.some(k => k !== 'title')) throw 'Pages under a page can only have a title property.'
         } else throw 'parent is required'
-        const page = { root: true, id: randomUUID(), url: 'https://www.notion.so/mock-page', parent, workspace: ws.name, properties: body.properties, blocks: [] }
+        const page = { root: true, id: randomUUID(), url: `https://www.notion.so/${randomUUID()}`, parent, workspace: ws.name, properties: body.properties, blocks: [] }
         addChildren(page, body.children || [])
         pages.set(page.id, page)
+        if (state.dropCreates > 0) { state.dropCreates--; return loseResponse() }
         return send(200, { object: 'page', id: page.id, url: page.url })
       }
       if ((m = url.pathname.match(/^\/v1\/blocks\/([^/]+)\/children$/))) {
         const page = pages.get(m[1])
-        if (!page) return send(404, { code: 'object_not_found', message: 'Could not find block' })
+        if (!page && !ws.pages[m[1]]) return send(404, { code: 'object_not_found', message: 'Could not find block' })
         if (req.method === 'PATCH') {
           if (state.failAppends > 0) { state.failAppends--; return send(503, { code: 'service_unavailable', message: 'Notion is unavailable' }) }
           addChildren(page, body.children)
+          if (state.dropAppends > 0) { state.dropAppends--; return loseResponse() }
           return send(200, { results: [] })
         }
         const size = Number(url.searchParams.get('page_size') || 100)
         const start = Number(url.searchParams.get('start_cursor') || 0)
-        const results = page.blocks.slice(start, start + size)
-        const more = start + size < page.blocks.length
+        const children = page?.blocks || [...pages.values()].filter(p => p.root && p.workspace === ws.name && p.parent.page_id === m[1]).map(p => ({ id: p.id, type: 'child_page', child_page: { title: p.properties.title.title.map(t => t.text.content).join('') } }))
+        const results = children.slice(start, start + size)
+        const more = start + size < children.length
         return send(200, { results, has_more: more, next_cursor: more ? String(start + size) : null })
       }
       send(404, { code: 'object_not_found', message: `No route ${req.method} ${url.pathname}` })

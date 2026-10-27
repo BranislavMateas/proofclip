@@ -37,6 +37,7 @@ const LIVE_URLS = [
 ]
 
 const client = createClient({ token, apiBase })
+const recoveryOnly = process.argv.includes('--recovery-only')
 const created = []
 const step = msg => console.log(`✓ ${msg}`)
 let failures = 0
@@ -57,6 +58,44 @@ async function save(label, html, url, destination, propsFor) {
   return clip
 }
 
+async function recoveryProbe(destination, titleProperty) {
+  let loseCreate = true
+  let loseAppend = true
+  const faultyClient = createClient({ token, apiBase, fetchImpl: async (url, options) => {
+    const response = await fetch(url, options)
+    if (response.ok && options.method === 'POST' && url.endsWith('/v1/pages') && loseCreate) {
+      loseCreate = false
+      const page = await response.clone().json()
+      created.push({ kind: 'pages', id: page.id })
+      throw new Error('Simulated lost create response after Notion committed the page')
+    }
+    if (response.ok && options.method === 'PATCH' && url.endsWith('/children') && loseAppend) {
+      loseAppend = false
+      await response.text()
+      throw new Error('Simulated lost append response after Notion committed the blocks')
+    }
+    return response
+  } })
+  const clip = newClip({ source: 'article', title: 'Recovery test', url: 'https://example.com/recovery', markdown: '', connectionId: 'real', destination,
+    properties: { [titleProperty]: { title: [{ type: 'text', text: { content: 'Recovery test' } }] } },
+    blocks: Array.from({ length: 101 }, (_, i) => ({ object: 'block', type: 'paragraph', paragraph: { rich_text: [{ type: 'text', text: { content: `Recovery block ${i}` } }] } })),
+  })
+  let snapshot
+  const persist = async value => { snapshot = structuredClone(value) }
+  await uploadClip(clip, faultyClient, persist)
+  assert.equal(snapshot.status, 'failed')
+  assert.equal(snapshot.createPending, true)
+  for (let i = 0; i < 5 && snapshot.status !== 'verified'; i++) {
+    await uploadClip(structuredClone(snapshot), faultyClient, persist)
+    if (snapshot.status !== 'verified') await new Promise(resolve => setTimeout(resolve, 1000))
+  }
+  assert.equal(snapshot.status, 'verified', snapshot.error || snapshot.verifyNote)
+  assert.equal(loseCreate, false)
+  assert.equal(loseAppend, false)
+  assert.equal((await client.listChildren(snapshot.pageId)).length, 101)
+  step(`lost create and append responses recovered after storage reload (${destination.type})`)
+}
+
 try {
   const me = await client.me()
   step(`connected to “${me.bot?.workspace_name}” (API ${NOTION_VERSION})`)
@@ -66,34 +105,64 @@ try {
 
   const db = await client.createDatabase(pageId, `Proofclip test ${new Date().toISOString().slice(0, 16)}`)
   created.push({ kind: 'databases', id: db.id })
-  await client.addProperty(db.id, 'Source', 'url')
-  const props = editableProperties(await client.getDatabase(db.id))
+  const dataSourceId = db.data_sources[0].id
+  await client.addProperty(dataSourceId, 'Source', 'url')
+  const props = editableProperties(await client.getDataSource(dataSourceId))
   assert.deepEqual(props.map(p => p.type).sort(), ['multi_select', 'title', 'url', 'url'])
   step('created a links database and added a URL property')
-  const dbDest = { type: 'database', id: db.id, title: 'test db' }
+  const dbDest = { type: 'data_source', id: dataSourceId, title: 'test db' }
   const dbProps = (title, url, article) => buildProperties(props, { ...autofill(props, { title, url, byline: article?.byline }), Tags: ['proofclip-test'] })
 
-  await save('long fixture → database', readFileSync(new URL('./fixtures/long-article.html', import.meta.url), 'utf8'), 'https://example.com/guide', dbDest, dbProps)
-  await save('fixture → page', readFileSync(new URL('./fixtures/long-article.html', import.meta.url), 'utf8'), 'https://example.com/guide', { type: 'page', id: pageId, title: 'test page' }, title => ({ title: { title: [{ type: 'text', text: { content: title } }] } }))
+  if (recoveryOnly) {
+    const response = await fetch(`${apiBase}/v1/data_sources`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ parent: { type: 'database_id', database_id: db.id }, title: [{ type: 'text', text: { content: 'Second source' } }], properties: { Article: { title: {} } } }),
+    })
+    assert.equal(response.ok, true, `Create second data source: HTTP ${response.status}`)
+    const second = await response.json()
+    assert.equal((await client.getDatabase(db.id)).data_sources.length, 2)
+    await assert.rejects(client.resolveDestination({ type: 'database', id: db.id }), /choose a data source/)
+    await save('first source → multi-source database', '<html><title>First source</title><body><p>First source content.</p></body></html>', 'https://example.com/first', dbDest, dbProps)
+    const secondDest = { type: 'data_source', id: second.id, databaseId: db.id, title: 'Second source' }
+    await client.addProperty(second.id, 'Source URL', 'url')
+    assert.equal((await client.getDataSource(dataSourceId)).properties['Source URL'], undefined)
+    await save('second source → multi-source database', '<html><title>Second source</title><body><p>Second source content.</p></body></html>', 'https://example.com/second', secondDest,
+      title => ({ Article: { title: [{ type: 'text', text: { content: title } }] } }))
+    await recoveryProbe(secondDest, 'Article')
+    await recoveryProbe({ type: 'page', id: pageId, title: 'Test page' }, 'title')
+  } else {
+    await save('long fixture → database', readFileSync(new URL('./fixtures/long-article.html', import.meta.url), 'utf8'), 'https://example.com/guide', dbDest, dbProps)
+    await save('fixture → page', readFileSync(new URL('./fixtures/long-article.html', import.meta.url), 'utf8'), 'https://example.com/guide', { type: 'page', id: pageId, title: 'test page' }, title => ({ title: { title: [{ type: 'text', text: { content: title } }] } }))
 
-  for (const url of LIVE_URLS) {
-    const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0 Safari/537.36' } }).catch(e => ({ ok: false, statusText: e.message }))
-    if (!res.ok) {
-      console.log(`- skipped  ${url} (${res.status || ''} ${res.statusText})`)
-      continue
+    for (const url of LIVE_URLS) {
+      const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0 Safari/537.36' } }).catch(e => ({ ok: false, statusText: e.message }))
+      if (!res.ok) {
+        console.log(`- skipped  ${url} (${res.status || ''} ${res.statusText})`)
+        continue
+      }
+      await save(url, await res.text(), url, dbDest, dbProps)
     }
-    await save(url, await res.text(), url, dbDest, dbProps)
   }
 } finally {
   if (!KEEP) {
+    let cleaned = 0
     for (const { kind, id } of created.reverse()) {
-      await fetch(`${apiBase}/v1/${kind}/${id}`, {
-        method: 'PATCH',
-        headers: { Authorization: `Bearer ${token}`, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ archived: true }),
-      }).catch(() => {})
+      try {
+        const response = await fetch(`${apiBase}/v1/${kind}/${id}`, {
+          method: 'PATCH',
+          headers: { Authorization: `Bearer ${token}`, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ in_trash: true }),
+        })
+        assert.equal(response.ok, true, `Cleanup ${kind}/${id}: HTTP ${response.status}`)
+        assert.equal((await response.json()).in_trash, true)
+        cleaned++
+      } catch (e) {
+        failures++
+        console.error(`Cleanup failed: ${e.message}`)
+      }
     }
-    console.log(`cleaned up ${created.length} test objects (moved to trash)`)
+    console.log(`cleaned up ${cleaned}/${created.length} test objects (moved to trash)`)
   }
 }
 console.log(failures ? `\n${failures} FAILED against real Notion` : '\nREAL NOTION PASSED')

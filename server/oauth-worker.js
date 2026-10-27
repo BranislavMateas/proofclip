@@ -16,7 +16,7 @@ export default {
       headers: {
         Authorization: `Basic ${btoa(`${env.NOTION_CLIENT_ID}:${env.NOTION_CLIENT_SECRET}`)}`,
         'Content-Type': 'application/json',
-        'Notion-Version': '2022-06-28',
+        'Notion-Version': '2026-03-11',
       },
       body: JSON.stringify({ grant_type: 'authorization_code', code, redirect_uri }),
     })

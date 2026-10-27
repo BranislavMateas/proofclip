@@ -1,6 +1,6 @@
 {
   "name": "proofclip",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Open-source Notion web clipper that verifies every save",
   "scripts": {
     "test": "node --test test/*.test.js",

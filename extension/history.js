@@ -8,6 +8,12 @@ const download = (name, text, type) =>
 
 const button = (label, onclick) => Object.assign(document.createElement('button'), { textContent: label, onclick })
 
+function queueRetry(clip) {
+  // Preserve uncertainty when resetting the retry counter for old clips.
+  if (!clip.pageId && clip.createPending === undefined && clip.attempts > 0) clip.legacyUncertain = true
+  Object.assign(clip, { status: 'queued', attempts: 0, retryable: true })
+}
+
 async function render() {
   const list = await clips.list()
   $('empty').hidden = list.length > 0
@@ -26,8 +32,8 @@ async function render() {
     if (['failed', 'mismatch'].includes(clip.status)) {
       actions.append(button(clip.status === 'mismatch' ? 'Save again' : 'Retry', async () => {
         // A mismatched page is left as is; saving again creates a fresh page.
-        if (clip.status === 'mismatch') Object.assign(clip, { pageId: null, pageUrl: null, uploadedBatches: 0 })
-        Object.assign(clip, { status: 'queued', attempts: 0, retryable: true })
+        if (clip.status === 'mismatch') Object.assign(clip, { pageId: null, pageUrl: null, uploadedBatches: 0, createPending: false, createMarker: null, titleRestored: false, pendingAppend: null, legacyUncertain: false })
+        queueRetry(clip)
         await clips.put(clip)
         chrome.runtime.sendMessage({ type: 'upload', id: clip.id })
       }), ' ')
@@ -44,7 +50,7 @@ async function render() {
 $('retryAll').onclick = async () => {
   for (const clip of await clips.list()) {
     if (clip.status !== 'failed') continue
-    Object.assign(clip, { status: 'queued', attempts: 0, retryable: true })
+    queueRetry(clip)
     await clips.put(clip)
     chrome.runtime.sendMessage({ type: 'upload', id: clip.id })
   }

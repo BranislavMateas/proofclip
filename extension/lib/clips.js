@@ -49,6 +49,10 @@ export function newClip({ source, title, url, blocks, markdown, destination, con
     pageId: null,
     pageUrl: null,
     uploadedBatches: 0,
+    createPending: false,
+    createMarker: null,
+    titleRestored: false,
+    pendingAppend: null,
     error: null,
     retryable: true,
     nextRetryAt: null,
@@ -62,17 +66,71 @@ export async function uploadClip(clip, client, persist) {
   Object.assign(clip, { status: 'saving', error: null, nextRetryAt: null })
   await persist(clip)
   try {
+    // Resolve old saved destinations only when their database is unambiguous.
+    if (!clip.pageId && clip.destination.type === 'database') {
+      clip.destination = await client.resolveDestination(clip.destination)
+      await persist(clip)
+    }
     if (!clip.pageId && clip.ensureUrlProperty) await addUrlProperty(clip, client, persist)
     if (!clip.pageId) {
+      // Pre-upgrade attempts had no recovery marker. Never silently recreate one.
+      if (clip.legacyUncertain || (clip.createPending === undefined && clip.attempts > 1)) {
+        clip.legacyUncertain = true
+        const e = new Error('An earlier version attempted this save without a recovery marker. Check Notion before making a new clip.')
+        e.retryable = false
+        throw e
+      }
       const { type, id } = clip.destination
-      const parent = type === 'database' ? { database_id: id } : { page_id: id }
-      const page = await client.createPage({ parent, properties: clip.properties, children: batches[0] || [] })
-      Object.assign(clip, { pageId: page.id, pageUrl: page.url, uploadedBatches: 1 })
+      const parent = type === 'data_source' ? { data_source_id: id } : { page_id: id }
+      const titleProperty = Object.keys(clip.properties).find(name => 'title' in clip.properties[name])
+      if (!titleProperty) throw Object.assign(new Error('The destination has no title property. Choose it again.'), { retryable: false })
+      let page
+      if (clip.createPending) {
+        const matches = await client.findCreatedPage(clip.destination, clip.createMarker, titleProperty)
+        if (matches.length !== 1) throw new Error(matches.length ? 'Multiple recovery pages found. Check Notion before making a new clip.' : 'The previous save is uncertain. Its recovery page is not visible yet. Retry to check again; no second page will be created.')
+        page = matches[0]
+      } else {
+        clip.createMarker ||= `Proofclip pending ${crypto.randomUUID()}`
+        clip.createPending = true
+        await persist(clip)
+        try {
+          page = await client.createPage({ parent, properties: { ...clip.properties, [titleProperty]: { title: [{ type: 'text', text: { content: clip.createMarker } }] } }, children: batches[0] || [] })
+          if (!page?.id || !page?.url) throw new Error('Notion returned an incomplete page response. Retry to recover the page.')
+        } catch (e) {
+          if (definitelyRejected(e)) clip.createPending = false
+          throw e
+        }
+      }
+      Object.assign(clip, { pageId: page.id, pageUrl: page.url, uploadedBatches: 1, createPending: false })
+      await persist(clip)
+    }
+    // Store the page ID before replacing its unique recovery title. A lost
+    // update response is safe: updating properties again does not add content.
+    if (clip.createMarker && !clip.titleRestored) {
+      await client.updatePage(clip.pageId, clip.properties)
+      clip.titleRestored = true
+      await persist(clip)
+    }
+    if (clip.pendingAppend) {
+      const { index, end } = clip.pendingAppend
+      const expected = clip.blocks.slice(0, end)
+      const check = await verifyTree(expected, client.listChildren, clip.pageId)
+      if (!check.ok) throw new Error(`The previous block upload is uncertain. ${check.note} Retry to check again; no blocks will be sent twice.`)
+      clip.uploadedBatches = index + 1
+      clip.pendingAppend = null
       await persist(clip)
     }
     for (let i = clip.uploadedBatches; i < batches.length; i++) {
-      await client.appendChildren(clip.pageId, batches[i])
+      clip.pendingAppend = { index: i, end: batches.slice(0, i + 1).reduce((n, batch) => n + batch.length, 0) }
+      await persist(clip)
+      try {
+        await client.appendChildren(clip.pageId, batches[i])
+      } catch (e) {
+        if (definitelyRejected(e)) clip.pendingAppend = null
+        throw e
+      }
       clip.uploadedBatches = i + 1
+      clip.pendingAppend = null
       await persist(clip)
     }
     clip.status = 'verifying'
@@ -91,6 +149,9 @@ export async function uploadClip(clip, client, persist) {
   await persist(clip)
   return clip
 }
+
+// A transport failure, conflict or server failure can follow a committed write.
+const definitelyRejected = e => e.status >= 400 && e.status < 500 && ![408, 409].includes(e.status)
 
 // Like Notion's clipper, databases without a URL property get one, so the
 // source is always recorded. Lacking permission to edit the schema is not fatal.

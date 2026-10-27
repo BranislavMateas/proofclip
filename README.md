@@ -13,7 +13,7 @@ back from Notion and compares their types and text, including nested blocks.
 - **Preview before saving.** See the blocks that will be sent to Notion.
 - **Choose your content.** Clip the article, your selection, or the full page.
 - **Organize in the popup.** Edit supported properties and tags, search destinations,
-  or create a new links database.
+  choose a data source from a multi-source database, or create a links database.
 - **Keep a local copy.** Failed uploads stay in History and can retry automatically.
 - **Check the result.** See a verified result or a mismatch message after saving.
 - **Take your content with you.** Copy or download Markdown, or back up clips as JSON.
@@ -21,7 +21,9 @@ back from Notion and compares their types and text, including nested blocks.
 
 ## Install
 
-The Chrome Web Store release is being prepared. You can load the extension now:
+Install Proofclip from the [Chrome Web Store](https://chromewebstore.google.com/detail/proofclip-verified-web-cl/goijjkmcdkjafiloibilcenmilokokab).
+
+To load the development version:
 
 1. Download this repository and extract it, or clone it with Git.
 2. Open `chrome://extensions` and turn on **Developer mode**.
@@ -46,6 +48,16 @@ an OAuth deployment and is not configured in the distributed extension.
 Verification compares block types and text, with whitespace normalization. It does
 not confirm that external images remain available or compare all formatting and links.
 
+Each save starts with a temporary, unique page title. Proofclip stores the page ID
+before it restores your title. If the create response is lost, a retry finds that
+page through its parent. Interrupted block uploads are checked before more blocks
+are sent. These checks prevent application retries from creating duplicate pages
+or sending the same blocks twice.
+
+Proofclip uses Notion API `2026-03-11`. Search lists each data source separately.
+Remembered single-source databases migrate automatically. If a remembered database
+has multiple sources, choose a source before saving.
+
 ## Privacy
 
 Clips and connection details stay in your browser's local extension storage.
@@ -60,18 +72,21 @@ Do not post API tokens or private content in an issue.
 
 ```sh
 npm install
-npm test        # 27 unit/integration tests against a strict mock Notion API
+npm test        # 37 unit/integration tests against a strict mock Notion API
 npm run e2e     # real extension in Chrome, tested against the mock API
 npm run real    # live Notion API; requires NOTION_TOKEN and NOTION_PAGE_ID
-npm run package # build dist/proofclip-0.2.1.zip from extension/ only
+npm run real -- --recovery-only # live multi-source and lost-response recovery checks
+npm run package # build dist/proofclip-0.2.2.zip from extension/ only
 ```
 
 `npm run real` also reads a Git-ignored `.env.test` file. It moves the generated
 Notion pages and database to trash after the test. Set `KEEP=1` to retain them.
 Never put a token in tracked files or commit it to Git.
 
-On October 22, 2026, all eight live API clips passed verification, including six
-public websites. A separate Chrome run saved and verified a 265-block clip.
+On October 23, 2026, all eight live API clips passed verification, including six
+public websites. Separate live checks passed for both sources of a database and
+lost create and append responses. The Chrome tests also passed, including a
+266-block clip and selection between two data sources.
 
 ### Optional OAuth deployment
 
@@ -84,8 +99,10 @@ The client secret belongs on the server. Never bundle it in the extension.
 
 ## Current limitations
 
-- If Notion creates a page but its response is lost, a retry can create a duplicate page.
-- The extension uses Notion API version `2022-06-28`. Multi-source databases are not supported.
+- If an uncertain write cannot be found or verified, retries keep checking without
+  sending it again. Check Notion before starting a new clip. The local copy stays in History.
+- Saves attempted by older versions have no recovery marker. If their page ID is
+  unknown, Proofclip cannot safely retry them. Check Notion before making a new clip.
 - Safari and mobile share sheets are outside the current scope.
 
 ## Support the project

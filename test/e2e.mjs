@@ -143,7 +143,7 @@ try {
   step(`Enter saved: ${text}`)
 
   // 3. Reopen: last destination and tags are remembered; outage + retry.
-  mock.state.failCreates = 1
+  mock.state.dropCreates = 1
   await openPopup()
   await popup.waitForSelector('#prop-Tags button')
   assert.equal(await popup.$eval('#destLabel', l => l.textContent), '📚 Reading list')
@@ -277,6 +277,40 @@ try {
   assert.ok(rows.every(r => r === 'verified'), rows.join())
   await history.screenshot({ path: join(shots, 'history.png') })
   step(`history lists ${rows.length} verified clips`)
+
+  // Multi-source databases use the chosen source's schema and parent ID.
+  ws1.databases.multi = { title: 'Library', sources: [
+    { id: 'source-articles', title: 'Articles', properties: { Article: { type: 'title' }, Topic: { type: 'rich_text' } } },
+    { id: 'source-bookmarks', title: 'Bookmarks', properties: { Bookmark: { type: 'title' }, Link: { type: 'url' } } },
+  ] }
+  for (const [id, titleProperty, field] of [['source-articles', 'Article', 'Topic'], ['source-bookmarks', 'Bookmark', 'Link']]) {
+    await openPopup()
+    if (await popup.$eval('#destPanel', panel => panel.hidden)) await popup.click('#destButton')
+    await popup.type('#destSearch', 'Library')
+    await popup.waitForFunction(() => document.querySelectorAll('#destList button').length === 2)
+    await popup.click(`#destList button[data-id="${id}"]`)
+    await popup.waitForSelector(`#prop-${field}`)
+    await popup.waitForFunction(() => !document.getElementById('save').disabled)
+    await popup.click('#save')
+    ;[status, text] = await waitResult()
+    assert.equal(status, 'verified', text)
+    assert.deepEqual(lastPage().parent, { data_source_id: id })
+    assert.ok(lastPage().properties[titleProperty])
+  }
+  assert.equal(ws1.databases.multi.sources[0].properties.URL.type, 'url')
+  assert.equal(ws1.databases.multi.sources[1].properties.URL, undefined)
+  step('both sources of Library use separate schemas and receive verified clips')
+
+  // An ambiguous remembered database cannot enable Save before source selection.
+  await workerTarget.evaluate(async () => {
+    const { settings } = await chrome.storage.local.get('settings')
+    settings.lastDestination[settings.activeConnectionId] = { type: 'database', id: 'multi', title: 'Library' }
+    await chrome.storage.local.set({ settings })
+  })
+  await openPopup()
+  await popup.waitForFunction(() => /choose a data source/.test(document.getElementById('notice').textContent))
+  assert.equal(await popup.$eval('#save', b => b.disabled), true)
+  step('an old multi-source destination requires an explicit source selection')
   console.log('E2E PASSED')
 } finally {
   await browser.close()
